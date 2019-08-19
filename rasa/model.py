@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import typing
+from collections import namedtuple
 from typing import Text, Tuple, Union, Optional, List, Dict
 
 import rasa.utils.io
@@ -39,6 +40,8 @@ FINGERPRINT_RASA_VERSION_KEY = "version"
 FINGERPRINT_STORIES_KEY = "stories"
 FINGERPRINT_NLU_DATA_KEY = "messages"
 FINGERPRINT_TRAINED_AT_KEY = "trained_at"
+
+Section = namedtuple("Section", ["name", "relevant_keys"])
 
 
 def get_model(model_path: Text = DEFAULT_MODELS_PATH) -> TempDirectoryPath:
@@ -282,6 +285,17 @@ def persist_fingerprint(output_path: Text, fingerprint: Fingerprint):
     dump_obj_as_json_to_file(path, fingerprint)
 
 
+def section_fingerprint_changed(
+    fingerprint1: Fingerprint, fingerprint2: Fingerprint, section: Section
+) -> bool:
+    """Check whether the fingerprint of a section has changed."""
+    for k in section.relevant_keys:
+        if fingerprint1.get(k) != fingerprint2.get(k):
+            logger.info("Data ({}) for {} section changed.".format(k, section.name))
+            return True
+    return False
+
+
 def templates_fingerprint_changed(
     fingerprint1: Fingerprint, fingerprint2: Fingerprint
 ) -> bool:
@@ -399,15 +413,44 @@ def should_retrain(new_fingerprint: Fingerprint, old_model: Text, train_path: Te
 
         old_core, old_nlu = get_model_subdirectories(unpacked)
 
-        if not templates_fingerprint_changed(last_fingerprint, new_fingerprint):
+        templates_section = Section(
+            name="Templates", relevant_keys=[FINGERPRINT_TEMPLATES_KEY]
+        )
+        core_section = Section(
+            name="Core model",
+            relevant_keys=[
+                FINGERPRINT_CONFIG_KEY,
+                FINGERPRINT_CONFIG_CORE_KEY,
+                FINGERPRINT_DOMAIN_WITHOUT_TEMPLATES_KEY,
+                FINGERPRINT_STORIES_KEY,
+                FINGERPRINT_RASA_VERSION_KEY,
+            ],
+        )
+        nlu_section = Section(
+            name="NLU model",
+            relevant_keys=[
+                FINGERPRINT_CONFIG_KEY,
+                FINGERPRINT_CONFIG_NLU_KEY,
+                FINGERPRINT_NLU_DATA_KEY,
+                FINGERPRINT_RASA_VERSION_KEY,
+            ],
+        )
+
+        if not section_fingerprint_changed(
+            last_fingerprint, new_fingerprint, templates_section
+        ):
             target_path = os.path.join(train_path, "core")
             replace_templates = not merge_model(old_core, target_path)
 
-        if not core_fingerprint_changed(last_fingerprint, new_fingerprint):
+        if not section_fingerprint_changed(
+            last_fingerprint, new_fingerprint, core_section
+        ):
             target_path = os.path.join(train_path, "core")
             retrain_core = not merge_model(old_core, target_path)
 
-        if not nlu_fingerprint_changed(last_fingerprint, new_fingerprint):
+        if not section_fingerprint_changed(
+            last_fingerprint, new_fingerprint, nlu_section
+        ):
             target_path = os.path.join(train_path, "nlu")
             retrain_nlu = not merge_model(old_nlu, target_path)
 
