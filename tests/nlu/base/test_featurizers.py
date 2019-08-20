@@ -29,7 +29,7 @@ def test_spacy_featurizer(sentence, expected, spacy_nlp):
     assert np.allclose(vecs, doc.vector, atol=1e-5)
 
 
-def test_mitie_featurizer(mitie_feature_extractor, default_config):
+def test_mitie_featurizer(mitie_feature_extractor):
     from rasa.nlu.featurizers.mitie_featurizer import MitieFeaturizer
 
     mitie_component_config = {"name": "MitieFeaturizer"}

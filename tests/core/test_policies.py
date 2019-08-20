@@ -75,15 +75,6 @@ async def train_trackers(domain, augmentation_factor=20):
     )
 
 
-@pytest.fixture(scope="module")
-def loop():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop = rasa.utils.io.enable_async_loop_debugging(loop)
-    yield loop
-    loop.close()
-
-
 # We are going to use class style testing here since unfortunately pytest
 # doesn't support using fixtures as arguments to its own parameterize yet
 # (hence, we can't train a policy, declare it as a fixture and use the
@@ -366,10 +357,6 @@ class TestSklearnPolicy(PolicyTestCollection):
             gs.best_score_ = 0.123
             gs.return_value = gs  # for __init__
             yield gs
-
-    @pytest.fixture(scope="module")
-    def default_domain(self):
-        return Domain.load(DEFAULT_DOMAIN_PATH_WITH_SLOTS)
 
     @pytest.fixture
     def tracker(self, default_domain):

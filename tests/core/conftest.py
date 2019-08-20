@@ -73,60 +73,6 @@ class ExamplePolicy(Policy):
 
 
 @pytest.fixture
-def loop():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop = rasa.utils.io.enable_async_loop_debugging(loop)
-    yield loop
-    loop.close()
-
-
-@pytest.fixture
-def default_agent_path(default_agent, tmpdir_factory):
-    path = tmpdir_factory.mktemp("agent").strpath
-    default_agent.persist(path)
-    return path
-
-
-@pytest.fixture(scope="session")
-def default_domain_path():
-    return DEFAULT_DOMAIN_PATH_WITH_SLOTS
-
-
-@pytest.fixture(scope="session")
-def default_stories_file():
-    return DEFAULT_STORIES_FILE
-
-
-@pytest.fixture(scope="session")
-def default_stack_config():
-    return DEFAULT_STACK_CONFIG
-
-
-@pytest.fixture(scope="session")
-def default_nlu_data():
-    return DEFAULT_NLU_DATA
-
-
-@pytest.fixture(scope="session")
-def default_domain():
-    return Domain.load(DEFAULT_DOMAIN_PATH_WITH_SLOTS)
-
-
-@pytest.fixture
-async def default_agent(default_domain):
-    agent = Agent(
-        default_domain,
-        policies=[MemoizationPolicy()],
-        interpreter=RegexInterpreter(),
-        tracker_store=InMemoryTrackerStore(default_domain),
-    )
-    training_data = await agent.load_data(DEFAULT_STORIES_FILE)
-    agent.train(training_data)
-    return agent
-
-
-@pytest.fixture
 def default_channel():
     return CollectingOutputChannel()
 

@@ -1,10 +1,19 @@
+import asyncio
 import os
 import shutil
-from typing import Text
+from typing import Text, List
 
+import matplotlib
 import pytest
 import logging
 
+from async_generator import yield_, async_generator
+from sanic import Sanic
+
+import rasa.utils.io
+import rasa.nlu.config
+import rasa.core.config
+from rasa.core.policies import Policy
 from rasa.core.domain import Domain
 from rasa.constants import (
     DEFAULT_DOMAIN_PATH,
@@ -16,13 +25,15 @@ from rasa.core.interpreter import RegexInterpreter
 from rasa.core.tracker_store import InMemoryTrackerStore
 from rasa.core.run import _create_app_without_api
 from rasa import server
-from rasa.core import config
 from rasa.core.agent import Agent, load_agent
 from rasa.core.channels.channel import RestInput
 from rasa.core.channels import channel
 from rasa.core.policies.memoization import MemoizationPolicy
 from rasa.model import get_model
 from rasa.train import train_async
+
+
+matplotlib.use("Agg")
 
 
 # we reuse a bit of pytest's own testing machinery, this should eventually come
@@ -38,6 +49,17 @@ END_TO_END_STORY_FILE = "data/test_evaluations/end_to_end_story.md"
 END_TO_END_STORY_FILE_UNKNOWN_ENTITY = "data/test_evaluations/story_unknown_entity.md"
 
 MOODBOT_MODEL_DIRECTORY = "examples/moodbot/"
+
+
+@pytest.fixture
+def loop():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop = rasa.utils.io.enable_async_loop_debugging(loop)
+
+    yield loop
+
+    loop.close()
 
 
 @pytest.fixture(autouse=True)
@@ -68,52 +90,57 @@ def project() -> Text:
 
 
 @pytest.fixture(scope="session")
-def default_domain_path_with_slots():
+def default_domain_path_with_slots() -> Text:
     return DOMAIN_PATH_WITH_SLOTS
 
 
 @pytest.fixture(scope="session")
-def default_domain_path_with_mapping():
+def default_domain_path_with_mapping() -> Text:
     return DOMAIN_PATH_WITH_MAPPING
 
 
 @pytest.fixture(scope="session")
-def default_domain_path(project):
+def default_domain_path(project: Text) -> Text:
     return os.path.join(project, DEFAULT_DOMAIN_PATH)
 
 
 @pytest.fixture(scope="session")
-def default_stories_file(project):
+def default_stories_file(project: Text) -> Text:
     return os.path.join(project, DEFAULT_DATA_PATH, "stories.md")
 
 
 @pytest.fixture(scope="session")
-def default_nlu_file(project):
+def default_nlu_file(project: Text) -> Text:
     return os.path.join(project, DEFAULT_DATA_PATH, "nlu.md")
 
 
 @pytest.fixture(scope="session")
-def default_config_path(project):
+def default_config_path(project: Text) -> Text:
     return os.path.join(project, DEFAULT_CONFIG_PATH)
 
 
 @pytest.fixture(scope="session")
-def end_to_end_story_file():
+def end_to_end_story_file() -> Text:
     return END_TO_END_STORY_FILE
 
 
 @pytest.fixture(scope="session")
-def end_to_end_story_file_with_unkown_entity():
+def end_to_end_story_file_with_unkown_entity() -> Text:
     return END_TO_END_STORY_FILE_UNKNOWN_ENTITY
 
 
 @pytest.fixture(scope="session")
-def default_config(default_config_path):
-    return config.load(default_config_path)
+def default_core_config(default_config_path: Text) -> List[Policy]:
+    return rasa.core.config.load(default_config_path)
 
 
 @pytest.fixture(scope="session")
-def default_domain(default_domain_path):
+def default_nlu_config(default_config_path: Text) -> rasa.nlu.config.RasaNLUModelConfig:
+    return rasa.nlu.config.load(default_config_path)
+
+
+@pytest.fixture(scope="session")
+def default_domain(default_domain_path) -> Domain:
     return Domain.load(default_domain_path)
 
 
@@ -123,41 +150,53 @@ def default_domain(default_domain_path):
 
 
 @pytest.fixture
-async def stack_agent(trained_model) -> Agent:
-    return await load_agent(model_path=trained_model)
+@async_generator
+async def stack_agent(trained_model: Text) -> Agent:
+    agent = await load_agent(model_path=trained_model)
+    await yield_(agent)
+    del agent
 
 
 @pytest.fixture
-async def core_agent(trained_core_model) -> Agent:
-    return await load_agent(model_path=trained_core_model)
+@async_generator
+async def core_agent(trained_core_model: Text) -> Agent:
+    agent = await load_agent(model_path=trained_core_model)
+    await yield_(agent)
+    del agent
 
 
 @pytest.fixture
-async def nlu_agent(trained_nlu_model) -> Agent:
-    return await load_agent(model_path=trained_nlu_model)
+@async_generator
+async def nlu_agent(trained_nlu_model: Text) -> Agent:
+    agent = await load_agent(model_path=trained_nlu_model)
+    await yield_(agent)
+    del agent
 
 
 @pytest.fixture
+@async_generator
 async def default_agent(
-    tmpdir_factory, default_stories_file, default_domain_path
+    tmpdir_factory, default_stories_file: Text, default_domain: Domain
 ) -> Agent:
-    model_path = tmpdir_factory.mktemp("model").strpath
-
     agent = Agent(
-        default_domain_path,
+        default_domain,
         policies=[MemoizationPolicy()],
         interpreter=RegexInterpreter(),
-        tracker_store=InMemoryTrackerStore(default_domain_path),
+        tracker_store=InMemoryTrackerStore(default_domain),
     )
 
     training_data = await agent.load_data(default_stories_file)
     agent.train(training_data)
-    agent.persist(model_path)
 
-    yield agent
+    await yield_(agent)
+    del agent
 
-    if os.path.exists(model_path):
-        shutil.rmtree(model_path)
+
+@pytest.fixture
+async def default_agent_path(default_agent: Agent, tmpdir_factory) -> Text:
+    path = tmpdir_factory.mktemp("agent").strpath
+    default_agent.persist(path)
+    return path
 
 
 #############
@@ -166,38 +205,47 @@ async def default_agent(
 
 
 @pytest.fixture
-async def rasa_server(stack_agent):
+@async_generator
+async def rasa_server(stack_agent: Agent) -> Sanic:
     app = server.create_app(agent=stack_agent)
     channel.register([RestInput()], app, "/webhooks/")
-    return app
+    await yield_(app)
+    del app
 
 
 @pytest.fixture
-async def rasa_core_server(core_agent):
+@async_generator
+async def rasa_core_server(core_agent: Agent) -> Sanic:
     app = server.create_app(agent=core_agent)
     channel.register([RestInput()], app, "/webhooks/")
-    return app
+    await yield_(app)
+    del app
 
 
 @pytest.fixture
-async def rasa_nlu_server(nlu_agent):
+@async_generator
+async def rasa_nlu_server(nlu_agent: Agent) -> Sanic:
     app = server.create_app(agent=nlu_agent)
     channel.register([RestInput()], app, "/webhooks/")
-    return app
+    await yield_(app)
+    del app
 
 
 @pytest.fixture
-async def rasa_server_secured(default_agent):
+@async_generator
+async def rasa_server_secured(default_agent: Agent) -> Sanic:
     app = server.create_app(agent=default_agent, auth_token="rasa", jwt_secret="core")
     channel.register([RestInput()], app, "/webhooks/")
-    return app
+    await yield_(app)
+    del app
 
 
 @pytest.fixture
-async def rasa_server_without_api():
+def rasa_server_without_api() -> Sanic:
     app = _create_app_without_api()
     channel.register([RestInput()], app, "/webhooks/")
-    return app
+    yield app
+    del app
 
 
 ################
@@ -206,54 +254,47 @@ async def rasa_server_without_api():
 
 
 @pytest.fixture
-async def trained_model(project) -> Text:
-    yield await train_model(project)
-
-    model_dir = os.path.join(project, DEFAULT_MODELS_PATH)
-    if os.path.exists(model_dir):
-        shutil.rmtree(model_dir)
-
-
-@pytest.fixture
-async def trained_core_model(project) -> Text:
-    yield await train_model(project, model_type="core")
-
-    model_dir = os.path.join(project, DEFAULT_MODELS_PATH)
-    if os.path.exists(model_dir):
-        shutil.rmtree(model_dir)
+@async_generator
+async def trained_model(project: Text) -> Text:
+    model_path = await train_model(project)
+    await yield_(model_path)
+    shutil.rmtree(model_path, ignore_errors=True)
 
 
 @pytest.fixture
-async def trained_nlu_model(project) -> Text:
-    yield await train_model(project, model_type="nlu")
-
-    model_dir = os.path.join(project, DEFAULT_MODELS_PATH)
-    if os.path.exists(model_dir):
-        shutil.rmtree(model_dir)
+@async_generator
+async def trained_core_model(project: Text) -> Text:
+    model_path = await train_model(project, model_type="core")
+    await yield_(model_path)
+    shutil.rmtree(model_path, ignore_errors=True)
 
 
 @pytest.fixture
+@async_generator
+async def trained_nlu_model(project: Text) -> Text:
+    model_path = await train_model(project, model_type="nlu")
+    await yield_(model_path)
+    shutil.rmtree(model_path, ignore_errors=True)
+
+
+@pytest.fixture
+@async_generator
 async def trained_moodbot_path():
-    yield await train_async(
+    model_path = await train_async(
         domain=os.path.join(MOODBOT_MODEL_DIRECTORY, DEFAULT_DOMAIN_PATH),
         config=os.path.join(MOODBOT_MODEL_DIRECTORY, DEFAULT_CONFIG_PATH),
         training_files=os.path.join(MOODBOT_MODEL_DIRECTORY, DEFAULT_DATA_PATH),
         output_path=os.path.join(MOODBOT_MODEL_DIRECTORY, DEFAULT_MODELS_PATH),
     )
-
-    model_dir = os.path.join(MOODBOT_MODEL_DIRECTORY, DEFAULT_MODELS_PATH)
-    if os.path.exists(model_dir):
-        shutil.rmtree(model_dir)
+    await yield_(model_path)
+    shutil.rmtree(model_path, ignore_errors=True)
 
 
 @pytest.fixture
-def unpacked_trained_moodbot_path(trained_moodbot_path):
+def unpacked_trained_moodbot_path(trained_moodbot_path: Text):
     model_dir = get_model(trained_moodbot_path)
-
     yield model_dir
-
-    if os.path.exists(model_dir):
-        shutil.rmtree(model_dir)
+    shutil.rmtree(model_dir, ignore_errors=True)
 
 
 async def train_model(

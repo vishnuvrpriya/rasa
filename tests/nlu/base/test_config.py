@@ -8,14 +8,15 @@ import rasa.utils.io
 from rasa.nlu import config
 from rasa.nlu.components import ComponentBuilder
 from rasa.nlu.registry import registered_pipeline_templates
-from tests.nlu.conftest import CONFIG_DEFAULTS_PATH
 from tests.nlu.utilities import write_file_config
+
+CONFIG_DEFAULTS_PATH = "rasa/cli/initial_project/config.yml"
 
 defaults = rasa.utils.io.read_config_file(CONFIG_DEFAULTS_PATH)
 
 
-def test_default_config(default_config):
-    assert default_config.as_dict() == defaults
+def test_default_config(default_nlu_config):
+    assert default_nlu_config.as_dict() == defaults
 
 
 def test_blank_config():

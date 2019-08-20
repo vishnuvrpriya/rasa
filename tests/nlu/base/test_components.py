@@ -54,19 +54,19 @@ def test_find_unavailable_packages():
     assert unavailable == {"my_made_up_package_name", "foo_bar"}
 
 
-def test_builder_create_unknown(component_builder, default_config):
+def test_builder_create_unknown(component_builder, default_nlu_config):
     with pytest.raises(Exception) as excinfo:
         component_config = {"name": "my_made_up_componment"}
-        component_builder.create_component(component_config, default_config)
+        component_builder.create_component(component_config, default_nlu_config)
     assert "Unknown component name" in str(excinfo.value)
 
 
-def test_builder_create_by_module_path(component_builder, default_config):
+def test_builder_create_by_module_path(component_builder, default_nlu_config):
     from rasa.nlu.featurizers.regex_featurizer import RegexFeaturizer
 
     path = "rasa.nlu.featurizers.regex_featurizer.RegexFeaturizer"
     component_config = {"name": path}
-    component = component_builder.create_component(component_config, default_config)
+    component = component_builder.create_component(component_config, default_nlu_config)
     assert type(component) == RegexFeaturizer
 
 

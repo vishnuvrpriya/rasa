@@ -25,14 +25,9 @@ def component_builder():
 
 
 @pytest.fixture(scope="session")
-def default_config():
-    return config.load(CONFIG_DEFAULTS_PATH)
-
-
-@pytest.fixture(scope="session")
-def spacy_nlp(component_builder, default_config):
+def spacy_nlp(component_builder, default_nlu_config):
     spacy_nlp_config = {"name": "SpacyNLP"}
-    return component_builder.create_component(spacy_nlp_config, default_config).nlp
+    return component_builder.create_component(spacy_nlp_config, default_nlu_config).nlp
 
 
 @pytest.fixture(scope="session")
@@ -58,8 +53,8 @@ def ner_crf_pos_feature_config():
 
 
 @pytest.fixture(scope="session")
-def mitie_feature_extractor(component_builder, default_config):
+def mitie_feature_extractor(component_builder, default_nlu_config):
     mitie_nlp_config = {"name": "MitieNLP"}
     return component_builder.create_component(
-        mitie_nlp_config, default_config
+        mitie_nlp_config, default_nlu_config
     ).extractor
